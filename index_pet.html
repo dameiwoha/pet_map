@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台灣寵物友善店家互動地圖 Pet Friendly Map</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+        /* Custom map marker pulse animation */
+        .user-location-marker {
+            background-color: #3b82f6;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-amber-50/40 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Header -->
+    <header class="bg-amber-600 text-white shadow-md z-20 flex-none px-4 py-3 sm:px-6">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-white text-amber-600 p-2 rounded-xl shadow-inner">
+                    <i data-lucide="paw-print" class="w-6 h-6 sm:w-7 sm:h-7"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg sm:text-xl font-bold leading-tight">台灣寵物友善地圖</h1>
+                    <p class="text-xs text-amber-100 hidden sm:block">帶毛孩一起探索全台好去處</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+                <button id="locateMeBtn" class="flex items-center space-x-1 bg-amber-700 hover:bg-amber-800 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition shadow-sm" title="尋找附近店家">
+                    <i data-lucide="locate-fixed" class="w-4 h-4"></i>
+                    <span class="hidden md:inline">定位附近</span>
+                </button>
+                <button id="showFavoritesBtn" class="flex items-center space-x-1 bg-amber-700 hover:bg-amber-800 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition shadow-sm">
+                    <i data-lucide="heart" class="w-4 h-4 text-red-300"></i>
+                    <span class="hidden sm:inline">我的收藏</span>
+                    <span id="favoriteBadge" class="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">0</span>
+                </button>
+                <button id="openAddModalBtn" class="flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition shadow-sm">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">推薦店家</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col md:flex-row relative overflow-hidden">
+        
+        <!-- Sidebar Controls & List -->
+        <aside id="sidebar" class="w-full md:w-[420px] lg:w-[460px] bg-white flex flex-col z-10 shadow-lg border-r border-slate-200 transition-all duration-300 flex-none h-full max-h-full">
+            
+            <!-- Search & Filters Container -->
+            <div class="p-4 border-b border-slate-100 bg-amber-50/60 space-y-3 flex-none">
+                <!-- Search Box -->
+                <div class="relative">
+                    <input type="text" id="searchInput" placeholder="搜尋店家名稱、關鍵字或地址..." class="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 shadow-sm">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+                    <button id="clearSearchBtn" class="hidden absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                        <i data-lucide="x-circle" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Main Dropdown Filters -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">縣市區域</label>
+                        <select id="cityFilter" class="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            <option value="ALL">全部縣市</option>
+                            <option value="台北市">台北市</option>
+                            <option value="新北市">新北市</option>
+                            <option value="宜蘭縣">宜蘭縣</option>
+                            <option value="台中市">台中市</option>
+                            <option value="台南市">台南市</option>
+                            <option value="高雄市">高雄市</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">店家類型</label>
+                        <select id="categoryFilter" class="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            <option value="ALL">全部類別</option>
+                            <option value="cafes">餐廳/咖啡廳 ☕</option>
+                            <option value="hotels">旅宿/民宿 🏨</option>
+                            <option value="parks">景點/公園 🌳</option>
+                            <option value="supplies">用品/醫院 🐾</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Pet Amenity Tags Filter -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">友善規範與設施篩選</label>
+                    <div class="flex flex-wrap gap-1.5" id="ruleTagsContainer">
+                        <button data-rule="允許落地" class="rule-chip text-xs px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-amber-100 transition">🐾 可落地</button>
+                        <button data-rule="提供寵物餐" class="rule-chip text-xs px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-amber-100 transition">🍖 寵物餐</button>
+                        <button data-rule="大型犬OK" class="rule-chip text-xs px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-amber-100 transition">🐕‍🦺 大型犬OK</button>
+                        <button data-rule="有大草皮" class="rule-chip text-xs px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-amber-100 transition">🌿 有草皮</button>
+                    </div>
+                </div>
+
+                <!-- Stats summary -->
+                <div class="flex justify-between items-center pt-1 text-xs text-slate-500 font-medium">
+                    <span>共找到 <strong id="resultCount" class="text-amber-600 font-bold">0</strong> 間店家</span>
+                    <button id="resetFiltersBtn" class="text-amber-600 hover:underline flex items-center space-x-1">
+                        <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
+                        <span>重設條件</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Store Cards Scrollable Area -->
+            <div id="storeList" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                <!-- Cards injected dynamically via JS -->
+            </div>
+        </aside>
+
+        <!-- Interactive Map Container -->
+        <main class="flex-1 h-full relative">
+            <div id="map" class="w-full h-full min-h-[350px]"></div>
+
+            <!-- Mobile View Switcher (Floating Bottom Button) -->
+            <div class="md:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-[1000]">
+                <button id="mobileToggleBtn" class="flex items-center space-x-2 bg-amber-600 text-white px-5 py-3 rounded-full shadow-lg hover:bg-amber-700 font-semibold text-sm transition-all border-2 border-white">
+                    <i data-lucide="list" id="toggleIcon" class="w-5 h-5"></i>
+                    <span id="toggleText">切換為列表檢視</span>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Store Detail Modal -->
+    <div id="detailModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[2000] hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <button id="closeDetailModal" class="absolute top-3 right-3 bg-slate-100 hover:bg-slate-200 p-2 rounded-full text-slate-600 z-10 transition">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            
+            <div id="modalContent">
+                <!-- Injected dynamically via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add New Store Modal -->
+    <div id="addModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[2000] hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 relative">
+            <button id="closeAddModal" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <h3 class="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
+                <i data-lucide="store" class="text-amber-600"></i>
+                推薦寵物友善店家
+            </h3>
+            <p class="text-xs text-slate-500 mb-4">歡迎分享私藏的寵物好去處，資料將儲存於您的瀏覽器！</p>
+
+            <form id="addStoreForm" class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">店家名稱 *</label>
+                    <input type="text" id="addName" required placeholder="例如：毛孩小食堂" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">類別 *</label>
+                        <select id="addCategory" required class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                            <option value="cafes">餐廳/咖啡廳</option>
+                            <option value="hotels">旅宿/民宿</option>
+                            <option value="parks">景點/公園</option>
+                            <option value="supplies">用品/醫院</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">縣市 *</label>
+                        <select id="addCity" required class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                            <option value="台北市">台北市</option>
+                            <option value="新北市">新北市</option>
+                            <option value="宜蘭縣">宜蘭縣</option>
+                            <option value="台中市">台中市</option>
+                            <option value="台南市">台南市</option>
+                            <option value="高雄市">高雄市</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">完整地址 *</label>
+                    <input type="text" id="addAddress" required placeholder="例如：台北市大安區忠孝東路..." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">緯度 (Latitude)</label>
+                        <input type="number" step="any" id="addLat" placeholder="例如：25.033" class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">經度 (Longitude)</label>
+                        <input type="number" step="any" id="addLng" placeholder="例如：121.56" class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">電話 / 聯絡方式</label>
+                    <input type="text" id="addPhone" placeholder="02-12345678" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">友善規範 (多選)</label>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <label class="flex items-center space-x-1.5"><input type="checkbox" name="addRules" value="允許落地" class="rounded text-amber-600 focus:ring-amber-500"><span>允許落地</span></label>
+                        <label class="flex items-center space-x-1.5"><input type="checkbox" name="addRules" value="提供寵物餐" class="rounded text-amber-600 focus:ring-amber-500"><span>提供寵物餐</span></label>
+                        <label class="flex items-center space-x-1.5"><input type="checkbox" name="addRules" value="大型犬OK" class="rounded text-amber-600 focus:ring-amber-500"><span>大型犬OK</span></label>
+                        <label class="flex items-center space-x-1.5"><input type="checkbox" name="addRules" value="有大草皮" class="rounded text-amber-600 focus:ring-amber-500"><span>有大草皮</span></label>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">簡介與心得</label>
+                    <textarea id="addDesc" rows="2" placeholder="分享這個地方的特色或寵物入場規則..." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"></textarea>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-lg font-semibold text-sm transition shadow">確認新增</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-16 right-4 z-[3000] bg-slate-800 text-white px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-sm transform transition-all duration-300 translate-y-[-100px] opacity-0 pointer-events-none">
+        <i data-lucide="info" class="w-5 h-5 text-amber-400"></i>
+        <span id="toastMessage">訊息提示</span>
+    </div>
+
+    <script>
+        // Default Mock Store Data Across Taiwan
+        const initialStores = [
+            {
+                id: 's1',
+                name: '浪浪別哭 (台北店)',
+                category: 'cafes',
+                city: '台北市',
+                address: '台北市中正區林森北路9巷13號',
+                lat: 25.0458,
+                lng: 121.5242,
+                phone: '02 2356 7266',
+                rating: 4.8,
+                reviewsCount: 320,
+                rules: ['允許落地', '提供寵物餐', '大型犬OK'],
+                hours: '12:00 - 21:00 (週三公休)',
+                image: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=600&q=80',
+                description: '結合流浪動物中途與餐飲的咖啡廳，店內有親人的貓狗，也非常歡迎客人帶著自家的毛孩來玩！'
+            },
+            {
+                id: 's2',
+                name: '寵物公園 迎風狗運動公園',
+                category: 'parks',
+                city: '台北市',
+                address: '台北市松山區迎風河濱公園大直橋下',
+                lat: 25.0712,
+                lng: 121.5511,
+                phone: '02 2720 8889',
+                rating: 4.6,
+                reviewsCount: 450,
+                rules: ['允許落地', '大型犬OK', '有大草皮'],
+                hours: '24 小時開放',
+                image: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=600&q=80',
+                description: '全台第一座專為狗勾打造的運動公園，圍欄區分大犬小犬區域，設有雙重門安全保護與洗手台設施。'
+            },
+            {
+                id: 's3',
+                name: '森之王子 寵物景點民宿',
+                category: 'hotels',
+                city: '台中市',
+                address: '台中市新社區永源里永植路28號',
+                lat: 24.1650,
+                lng: 120.8033,
+                phone: '04 2582 1658',
+                rating: 4.7,
+                reviewsCount: 180,
+                rules: ['允許落地', '大型犬OK', '有大草皮', '提供寵物餐'],
+                hours: '入住 15:00 / 退房 11:00',
+                image: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=600&q=80',
+                description: '坐擁山景大草皮景觀，毛孩可在草地上盡情奔跑奔馳，提供寵物專屬備品與毛孩無鹽健康餐點。'
+            },
+            {
+                id: 's4',
+                name: '毛孩好食光 寵物主題餐廳',
+                category: 'cafes',
+                city: '新北市',
+                address: '新北市板橋區文化路一段188巷',
+                lat: 25.0160,
+                lng: 121.4630,
+                phone: '02 8258 1122',
+                rating: 4.9,
+                reviewsCount: 210,
+                rules: ['允許落地', '提供寵物餐'],
+                hours: '11:30 - 20:30',
+                image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=600&q=80',
+                description: '主打營養師調配寵物餐點，人用義大利麵與甜點也極具好評，內部乾淨無異味。'
+            },
+            {
+                id: 's5',
+                name: '台南毛樂園 景點園區',
+                category: 'parks',
+                city: '台南市',
+                address: '台南市安平區安平路300號',
+                lat: 22.9997,
+                lng: 120.1652,
+                phone: '06 221 8899',
+                rating: 4.5,
+                reviewsCount: 140,
+                rules: ['允許落地', '有大草皮', '大型犬OK'],
+                hours: '10:00 - 18:00 (週一二公休)',
+                image: 'https://images.unsplash.com/photo-1534361960057-19889db98d18?auto=format&fit=crop&w=600&q=80',
+                description: '適合一家大小與毛孩同遊的文創園區，戶外大草皮設有寵物障礙超越設施與噴水戲水池。'
+            },
+            {
+                id: 's6',
+                name: '高雄狗狗奔跑吧 寵物俱樂部',
+                category: 'cafes',
+                city: '高雄市',
+                address: '高雄市鼓山區美術東二路',
+                lat: 22.6560,
+                lng: 120.2925,
+                phone: '07 553 9988',
+                rating: 4.7,
+                reviewsCount: 290,
+                rules: ['允許落地', '提供寵物餐', '大型犬OK', '有大草皮'],
+                hours: '11:00 - 21:00',
+                image: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=600&q=80',
+                description: '美術館特區旁邊的寵物友善景觀餐廳，設有獨立圍欄跑跑草皮，並備有寵物洗澡水區。'
+            },
+            {
+                id: 's7',
+                name: '宜蘭綠意狗狗 B&B 民宿',
+                category: 'hotels',
+                city: '宜蘭縣',
+                address: '宜蘭縣冬山鄉柯林路',
+                lat: 24.6750,
+                lng: 121.7380,
+                phone: '0912 345 678',
+                rating: 4.9,
+                reviewsCount: 110,
+                rules: ['允許落地', '有大草皮', '大型犬OK'],
+                hours: '入住 15:00 / 退房 11:00',
+                image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=600&q=80',
+                description: '廣達千坪的羅東溪畔綠地民宿，毛孩可以直接進房同住（床墊需維護乾淨），並附贈毛孩早餐！'
+            },
+            {
+                id: 's8',
+                name: '台北毛毛動物醫院 & 寵物精品',
+                category: 'supplies',
+                city: '台北市',
+                address: '台北市大安區信義路四段',
+                lat: 25.0330,
+                lng: 121.5510,
+                phone: '02 2700 5566',
+                rating: 4.8,
+                reviewsCount: 390,
+                rules: ['允許落地'],
+                hours: '09:30 - 21:30',
+                image: 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=600&q=80',
+                description: '提供24小時急診服務的獸醫院，附設寬敞的寵物用品區與專業寵物美容沙龍。'
+            }
+        ];
+
+        // State
+        let stores = [];
+        let bookmarks = new Set();
+        let activeRules = new Set();
+        let map = null;
+        let markersGroup = null;
+        let userMarker = null;
+        let activeMobileView = 'map'; // 'map' or 'list'
+
+        // Category Icon Mapping & Colors
+        const categoryConfig = {
+            cafes: { label: '餐廳/咖啡廳', color: '#d97706', bg: 'bg-amber-100', text: 'text-amber-800', icon: 'coffee' },
+            hotels: { label: '旅宿/民宿', color: '#2563eb', bg: 'bg-blue-100', text: 'text-blue-800', icon: 'hotel' },
+            parks: { label: '景點/公園', color: '#16a34a', bg: 'bg-emerald-100', text: 'text-emerald-800', icon: 'trees' },
+            supplies: { label: '用品/醫院', color: '#9333ea', bg: 'bg-purple-100', text: 'text-purple-800', icon: 'shopping-bag' }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStoresData();
+            loadBookmarks();
+            initMap();
+            renderStoreList();
+            setupEventListeners();
+            lucide.createIcons();
+        });
+
+        // Load stores from LocalStorage or use Default
+        function loadStoresData() {
+            const saved = localStorage.getItem('pet_friendly_stores');
+            if (saved) {
+                try {
+                    stores = JSON.parse(saved);
+                } catch(e) {
+                    stores = [...initialStores];
+                }
+            } else {
+                stores = [...initialStores];
+                localStorage.setItem('pet_friendly_stores', JSON.stringify(stores));
+            }
+        }
+
+        // Load bookmarks from LocalStorage
+        function loadBookmarks() {
+            const saved = localStorage.getItem('pet_friendly_bookmarks');
+            if (saved) {
+                try {
+                    bookmarks = new Set(JSON.parse(saved));
+                } catch(e) {
+                    bookmarks = new Set();
+                }
+            }
+            updateFavoriteBadge();
+        }
+
+        // Initialize Leaflet Map
+        function initMap() {
+            // Default centered at Taiwan middle/Taipei
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([24.5, 120.9], 8);
+
+            // Zoom controls repositioned
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+
+            markersGroup = L.layerGroup().addTo(map);
+            updateMapMarkers();
+        }
+
+        // Render or Update Map Markers based on filtered stores
+        function updateMapMarkers() {
+            if (!map || !markersGroup) return;
+            markersGroup.clearLayers();
+
+            const filtered = getFilteredStores();
+
+            filtered.forEach(store => {
+                const config = categoryConfig[store.category] || categoryConfig.cafes;
+                
+                // Custom Leaflet DivIcon
+                const customIcon = L.divIcon({
+                    className: 'custom-pin',
+                    html: `
+                        <div style="background-color: ${config.color};" class="w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white font-bold text-xs transform hover:scale-110 transition duration-150">
+                            🐾
+                        </div>
+                    `,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 32],
+                    popupAnchor: [0, -32]
+                });
+
+                const marker = L.marker([store.lat, store.lng], { icon: customIcon });
+
+                // Popup content
+                const popupHTML = `
+                    <div class="p-1 max-w-xs font-sans">
+                        <img src="${store.image}" class="w-full h-24 object-cover rounded-lg mb-2" alt="${store.name}" onerror="this.src='https://placehold.co/400x250/e2e8f0/64748b?text=寵物友善店家'">
+                        <span class="text-[10px] px-2 py-0.5 rounded ${config.bg} ${config.text} font-bold">${config.label}</span>
+                        <h4 class="font-bold text-sm text-slate-800 mt-1">${store.name}</h4>
+                        <p class="text-xs text-slate-500 line-clamp-1 mt-0.5">📍 ${store.address}</p>
+                        <div class="mt-2 flex items-center justify-between">
+                            <span class="text-xs font-bold text-amber-600">⭐ ${store.rating} (${store.reviewsCount})</span>
+                            <button onclick="openDetailModal('${store.id}')" class="text-xs bg-amber-600 text-white px-2.5 py-1 rounded-md font-medium hover:bg-amber-700 transition">
+                                查看詳情
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupHTML);
+                markersGroup.addLayer(marker);
+            });
+
+            // Adjust bounds if results exist
+            if (filtered.length > 0) {
+                const bounds = L.latLngBounds(filtered.map(s => [s.lat, s.lng]));
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+            }
+        }
+
+        // Get filtered stores array
+        function getFilteredStores() {
+            const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+            const cityVal = document.getElementById('cityFilter').value;
+            const categoryVal = document.getElementById('categoryFilter').value;
+            const onlyFavorites = document.getElementById('showFavoritesBtn').classList.contains('ring-2');
+
+            return stores.filter(store => {
+                // Search match
+                const matchSearch = !searchVal || 
+                    store.name.toLowerCase().includes(searchVal) ||
+                    store.address.toLowerCase().includes(searchVal) ||
+                    store.description.toLowerCase().includes(searchVal);
+
+                // City match
+                const matchCity = cityVal === 'ALL' || store.city === cityVal;
+
+                // Category match
+                const matchCategory = categoryVal === 'ALL' || store.category === categoryVal;
+
+                // Pet rules match
+                const matchRules = activeRules.size === 0 || Array.from(activeRules).every(rule => store.rules.includes(rule));
+
+                // Favorite match
+                const matchFav = !onlyFavorites || bookmarks.has(store.id);
+
+                return matchSearch && matchCity && matchCategory && matchRules && matchFav;
+            });
+        }
+
+        // Render Store List Cards
+        function renderStoreList() {
+            const container = document.getElementById('storeList');
+            const filtered = getFilteredStores();
+            document.getElementById('resultCount').textContent = filtered.length;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-slate-400">
+                        <i data-lucide="paw-print" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+                        <p class="font-semibold text-slate-600">找不到符合條件的寵物店家</p>
+                        <p class="text-xs mt-1">請嘗試調整搜尋條件或類別篩選</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = filtered.map(store => {
+                const isBookmarked = bookmarks.has(store.id);
+                const config = categoryConfig[store.category] || categoryConfig.cafes;
+
+                return `
+                    <div class="store-card bg-white rounded-xl p-3 shadow-sm hover:shadow-md border border-slate-100 transition cursor-pointer flex flex-col sm:flex-row gap-3 relative group"
+                         onclick="focusStore('${store.id}')">
+                        
+                        <!-- Store Image -->
+                        <div class="w-full sm:w-28 h-28 flex-none rounded-lg overflow-hidden bg-slate-100 relative">
+                            <img src="${store.image}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="${store.name}" onerror="this.src='https://placehold.co/300x300/e2e8f0/64748b?text=寵物友善'">
+                            <span class="absolute top-1.5 left-1.5 text-[10px] px-2 py-0.5 rounded ${config.bg} ${config.text} font-bold shadow-sm">
+                                ${config.label}
+                            </span>
+                        </div>
+
+                        <!-- Info -->
+                        <div class="flex-1 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start">
+                                    <h3 class="font-bold text-slate-800 text-base group-hover:text-amber-600 transition">${store.name}</h3>
+                                    <!-- Favorite button -->
+                                    <button onclick="event.stopPropagation(); toggleBookmark('${store.id}')" class="text-slate-300 hover:text-red-500 transition p-1" title="加入收藏">
+                                        <i data-lucide="heart" class="w-5 h-5 ${isBookmarked ? 'text-red-500 fill-red-500' : ''}"></i>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                    <i data-lucide="map-pin" class="w-3.5 h-3.5 flex-none text-slate-400"></i>
+                                    <span class="truncate">${store.address}</span>
+                                </p>
+                            </div>
+
+                            <!-- Pet Rule Badges -->
+                            <div class="flex flex-wrap gap-1 mt-2">
+                                ${store.rules.map(r => `<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">🐾 ${r}</span>`).join('')}
+                            </div>
+
+                            <!-- Bottom Row -->
+                            <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-50">
+                                <div class="flex items-center space-x-1">
+                                    <i data-lucide="star" class="w-3.5 h-3.5 text-amber-400 fill-amber-400"></i>
+                                    <span class="text-xs font-bold text-slate-700">${store.rating}</span>
+                                    <span class="text-[10px] text-slate-400">(${store.reviewsCount})</span>
+                                </div>
+                                <button onclick="event.stopPropagation(); openDetailModal('${store.id}')" class="text-xs font-semibold text-amber-600 hover:text-amber-800 flex items-center gap-0.5">
+                                    詳細資料 <i data-lucide="chevron-right" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+        }
+
+        // Focus map to specific store when card is clicked
+        function focusStore(id) {
+            const store = stores.find(s => s.id === id);
+            if (!store || !map) return;
+
+            map.setView([store.lat, store.lng], 15, { animate: true });
+
+            // Find marker and open popup
+            markersGroup.eachLayer(layer => {
+                if (layer.getLatLng().lat === store.lat && layer.getLatLng().lng === store.lng) {
+                    layer.openPopup();
+                }
+            });
+
+            // On mobile, automatically switch back to map view after selection
+            if (window.innerWidth < 768 && activeMobileView === 'list') {
+                toggleMobileView();
+            }
+        }
+
+        // Open Detail Modal Window
+        function openDetailModal(id) {
+            const store = stores.find(s => s.id === id);
+            if (!store) return;
+
+            const isBookmarked = bookmarks.has(store.id);
+            const config = categoryConfig[store.category] || categoryConfig.cafes;
+
+            const modalContent = document.getElementById('modalContent');
+            modalContent.innerHTML = `
+                <div class="relative h-48 sm:h-56">
+                    <img src="${store.image}" class="w-full h-full object-cover" alt="${store.name}" onerror="this.src='https://placehold.co/600x400/e2e8f0/64748b?text=寵物友善店家'">
+                    <span class="absolute top-3 left-3 text-xs px-2.5 py-1 rounded-full ${config.bg} ${config.text} font-bold shadow-md">
+                        ${config.label}
+                    </span>
+                </div>
+
+                <div class="p-6">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h2 class="text-xl font-bold text-slate-800">${store.name}</h2>
+                            <div class="flex items-center space-x-1 mt-1">
+                                <i data-lucide="star" class="w-4 h-4 text-amber-400 fill-amber-400"></i>
+                                <span class="text-sm font-bold text-slate-700">${store.rating}</span>
+                                <span class="text-xs text-slate-400">(${store.reviewsCount} 則評價)</span>
+                            </div>
+                        </div>
+                        <button onclick="toggleBookmark('${store.id}')" class="p-2.5 rounded-full border border-slate-200 hover:bg-slate-50 transition">
+                            <i data-lucide="heart" class="w-5 h-5 ${isBookmarked ? 'text-red-500 fill-red-500' : 'text-slate-400'}"></i>
+                        </button>
+                    </div>
+
+                    <p class="text-sm text-slate-600 mb-4 leading-relaxed">${store.description}</p>
+
+                    <div class="space-y-2.5 border-t border-b border-slate-100 py-4 mb-4 text-xs sm:text-sm">
+                        <div class="flex items-start gap-2 text-slate-600">
+                            <i data-lucide="map-pin" class="w-4 h-4 text-amber-600 flex-none mt-0.5"></i>
+                            <span>${store.address}</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-slate-600">
+                            <i data-lucide="phone" class="w-4 h-4 text-amber-600 flex-none"></i>
+                            <a href="tel:${store.phone}" class="hover:underline text-amber-700">${store.phone || '未提供電話'}</a>
+                        </div>
+                        <div class="flex items-center gap-2 text-slate-600">
+                            <i data-lucide="clock" class="w-4 h-4 text-amber-600 flex-none"></i>
+                            <span>${store.hours || '營業時間請洽店家'}</span>
+                        </div>
+                    </div>
+
+                    <div class="mb-6">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">寵物友善規範與設施</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                            ${store.rules.map(r => `<span class="text-xs bg-amber-100 text-amber-800 font-medium px-3 py-1 rounded-lg">🐾 ${r}</span>`).join('')}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.name + ' ' + store.address)}" target="_blank" rel="noopener noreferrer" class="flex items-center justify-center space-x-1.5 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-semibold text-sm transition shadow-sm">
+                            <i data-lucide="navigation" class="w-4 h-4"></i>
+                            <span>開啟導航</span>
+                        </a>
+                        <button onclick="focusStore('${store.id}'); closeDetailModal();" class="flex items-center justify-center space-x-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm transition">
+                            <i data-lucide="map" class="w-4 h-4"></i>
+                            <span>地圖定位</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            lucide.createIcons();
+            document.getElementById('detailModal').classList.remove('hidden');
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+        }
+
+        // Bookmark Toggle Functionality
+        function toggleBookmark(id) {
+            if (bookmarks.has(id)) {
+                bookmarks.delete(id);
+                showToast('已從收藏清單移除');
+            } else {
+                bookmarks.add(id);
+                showToast('已加入我的收藏');
+            }
+            localStorage.setItem('pet_friendly_bookmarks', JSON.stringify(Array.from(bookmarks)));
+            updateFavoriteBadge();
+            renderStoreList();
+            
+            // Update detail modal heart if open
+            const modal = document.getElementById('detailModal');
+            if (!modal.classList.contains('hidden')) {
+                openDetailModal(id);
+            }
+        }
+
+        function updateFavoriteBadge() {
+            document.getElementById('favoriteBadge').textContent = bookmarks.size;
+        }
+
+        // Geolocation: Find user current position
+        function locateUser() {
+            if (!navigator.geolocation) {
+                showToast('您的瀏覽器不支援 GPS 地理定位');
+                return;
+            }
+
+            showToast('正在尋找您的目前位置...');
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+
+                    if (userMarker) {
+                        map.removeLayer(userMarker);
+                    }
+
+                    // User Location Pulse Marker
+                    const userIcon = L.divIcon({
+                        className: 'user-location-marker',
+                        iconSize: [18, 18]
+                    });
+
+                    userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map)
+                        .bindPopup('<div class="font-bold text-xs p-1">📍 您的目前位置</div>')
+                        .openPopup();
+
+                    map.setView([lat, lng], 14, { animate: true });
+                    showToast('已成功定位您的位置');
+                },
+                (error) => {
+                    showToast('無法取得您的位置，請確認定位權限已開啟');
+                }
+            );
+        }
+
+        // Setup Event Listeners
+        function setupEventListeners() {
+            // Search Input
+            const searchInput = document.getElementById('searchInput');
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+            searchInput.addEventListener('input', (e) => {
+                if (e.target.value.trim().length > 0) {
+                    clearSearchBtn.classList.remove('hidden');
+                } else {
+                    clearSearchBtn.classList.add('hidden');
+                }
+                renderStoreList();
+                updateMapMarkers();
+            });
+
+            clearSearchBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                clearSearchBtn.classList.add('hidden');
+                renderStoreList();
+                updateMapMarkers();
+            });
+
+            // Filters Dropdown
+            document.getElementById('cityFilter').addEventListener('change', () => {
+                renderStoreList();
+                updateMapMarkers();
+            });
+
+            document.getElementById('categoryFilter').addEventListener('change', () => {
+                renderStoreList();
+                updateMapMarkers();
+            });
+
+            // Rule Chips Filter Buttons
+            document.querySelectorAll('.rule-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const rule = btn.getAttribute('data-rule');
+                    if (activeRules.has(rule)) {
+                        activeRules.delete(rule);
+                        btn.classList.remove('bg-amber-600', 'text-white', 'border-amber-600');
+                        btn.classList.add('bg-white', 'text-slate-600', 'border-slate-200');
+                    } else {
+                        activeRules.add(rule);
+                        btn.classList.add('bg-amber-600', 'text-white', 'border-amber-600');
+                        btn.classList.remove('bg-white', 'text-slate-600', 'border-slate-200');
+                    }
+                    renderStoreList();
+                    updateMapMarkers();
+                });
+            });
+
+            // Reset Filters
+            document.getElementById('resetFiltersBtn').addEventListener('click', () => {
+                document.getElementById('searchInput').value = '';
+                document.getElementById('clearSearchBtn').classList.add('hidden');
+                document.getElementById('cityFilter').value = 'ALL';
+                document.getElementById('categoryFilter').value = 'ALL';
+                
+                activeRules.clear();
+                document.querySelectorAll('.rule-chip').forEach(btn => {
+                    btn.classList.remove('bg-amber-600', 'text-white', 'border-amber-600');
+                    btn.classList.add('bg-white', 'text-slate-600', 'border-slate-200');
+                });
+
+                const favBtn = document.getElementById('showFavoritesBtn');
+                favBtn.classList.remove('ring-2', 'ring-white', 'bg-amber-800');
+
+                renderStoreList();
+                updateMapMarkers();
+                showToast('已重設所有篩選條件');
+            });
+
+            // Toggle Favorites Only Filter
+            document.getElementById('showFavoritesBtn').addEventListener('click', function() {
+                this.classList.toggle('ring-2');
+                this.classList.toggle('ring-white');
+                this.classList.toggle('bg-amber-800');
+                renderStoreList();
+                updateMapMarkers();
+            });
+
+            // GPS Locate
+            document.getElementById('locateMeBtn').addEventListener('click', locateUser);
+
+            // Detail Modal Close
+            document.getElementById('closeDetailModal').addEventListener('click', closeDetailModal);
+
+            // Add Store Modal Controls
+            const addModal = document.getElementById('addModal');
+            document.getElementById('openAddModalBtn').addEventListener('click', () => {
+                addModal.classList.remove('hidden');
+            });
+            document.getElementById('closeAddModal').addEventListener('click', () => {
+                addModal.classList.add('hidden');
+            });
+
+            // Add Store Form Submission
+            document.getElementById('addStoreForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+
+                const name = document.getElementById('addName').value.trim();
+                const category = document.getElementById('addCategory').value;
+                const city = document.getElementById('addCity').value;
+                const address = document.getElementById('addAddress').value.trim();
+                let lat = parseFloat(document.getElementById('addLat').value);
+                let lng = parseFloat(document.getElementById('addLng').value);
+                const phone = document.getElementById('addPhone').value.trim();
+                const description = document.getElementById('addDesc').value.trim();
+
+                // Selected rules checkboxes
+                const selectedRules = [];
+                document.querySelectorAll('input[name="addRules"]:checked').forEach(cb => {
+                    selectedRules.push(cb.value);
+                });
+
+                // Default fallback coords (Center of Taiwan approx) if empty
+                if (isNaN(lat)) lat = 24.1500;
+                if (isNaN(lng)) lng = 120.6700;
+
+                const newStore = {
+                    id: 'custom_' + Date.now(),
+                    name,
+                    category,
+                    city,
+                    address,
+                    lat,
+                    lng,
+                    phone: phone || '無提供',
+                    rating: 5.0,
+                    reviewsCount: 1,
+                    rules: selectedRules.length > 0 ? selectedRules : ['允許落地'],
+                    hours: '請洽店家',
+                    image: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=600&q=80',
+                    description: description || '使用者推薦寵物友善空間'
+                };
+
+                stores.unshift(newStore);
+                localStorage.setItem('pet_friendly_stores', JSON.stringify(stores));
+
+                addModal.classList.add('hidden');
+                document.getElementById('addStoreForm').reset();
+
+                renderStoreList();
+                updateMapMarkers();
+                focusStore(newStore.id);
+                showToast('成功推薦新店家！已儲存於瀏覽器');
+            });
+
+            // Mobile Toggle List/Map View
+            document.getElementById('mobileToggleBtn').addEventListener('click', toggleMobileView);
+        }
+
+        // Mobile Layout Toggle (List vs Map)
+        function toggleMobileView() {
+            const sidebar = document.getElementById('sidebar');
+            const toggleText = document.getElementById('toggleText');
+            const toggleIcon = document.getElementById('toggleIcon');
+
+            if (activeMobileView === 'map') {
+                activeMobileView = 'list';
+                sidebar.classList.remove('hidden');
+                sidebar.classList.add('fixed', 'inset-x-0', 'bottom-0', 'top-16', 'z-30');
+                toggleText.textContent = '切換為地圖檢視';
+                toggleIcon.setAttribute('data-lucide', 'map');
+            } else {
+                activeMobileView = 'map';
+                sidebar.classList.add('hidden');
+                sidebar.classList.remove('fixed', 'inset-x-0', 'bottom-0', 'top-16', 'z-30');
+                toggleText.textContent = '切換為列表檢視';
+                toggleIcon.setAttribute('data-lucide', 'list');
+                if (map) map.invalidateSize();
+            }
+            lucide.createIcons();
+        }
+
+        // Toast Alert Function
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toastMessage');
+
+            toastMsg.textContent = message;
+            toast.classList.remove('translate-y-[-100px]', 'opacity-0', 'pointer-events-none');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-[-100px]', 'opacity-0', 'pointer-events-none');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
